@@ -20,7 +20,7 @@ from typing import Optional, List, Dict
 # 基础配置
 BASE_URL = "https://huggingface.co"
 LIKES_THRESHOLD = 45  # 点赞数阈值
-TARGET_WEEK = "2026-W07"  # 目标周，格式如 "2026-W04"，None 表示使用当前周
+TARGET_WEEK = "2026-W09"  # 目标周，格式如 "2026-W04"，None 表示使用当前周
 
 # LLM配置
 LLM_CONFIG = {
@@ -332,8 +332,18 @@ class PaperTranslatorPipeline:
         
         # 确定输出文件名
         if output_file is None:
-            today = datetime.today()
-            start_of_week = today - timedelta(days=today.weekday())
+            if week is None:
+                today = datetime.today()
+                start_of_week = today - timedelta(days=today.weekday())
+            else:
+                # 从week字符串解析日期，格式如 "2026-W05"
+                year, week_num = week.split('-W')
+                year = int(year)
+                week_num = int(week_num)
+                # 计算该周的周一日期
+                jan_4 = datetime(year, 1, 4)
+                start_of_week = jan_4 - timedelta(days=jan_4.weekday()) + timedelta(weeks=week_num - 1)
+            
             weekdays = [start_of_week + timedelta(days=i) for i in range(5)]
             output_file = f"{weekdays[0].strftime('%Y%m%d')}-{weekdays[-1].strftime('%Y%m%d')}.md"
         
