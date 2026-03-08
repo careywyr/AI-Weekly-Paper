@@ -20,7 +20,7 @@ from typing import Optional, List, Dict
 # 基础配置
 BASE_URL = "https://huggingface.co"
 LIKES_THRESHOLD = 45  # 点赞数阈值
-TARGET_WEEK = "2026-W09"  # 目标周，格式如 "2026-W04"，None 表示使用当前周
+TARGET_WEEK = "2026-W10"  # 目标周，格式如 "2026-W04"，None 表示使用当前周
 
 # LLM配置
 LLM_CONFIG = {
