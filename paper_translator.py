@@ -4,14 +4,13 @@
 HuggingFace论文抓取与翻译脚本
 功能：
 1. 从HuggingFace weekly paper页面抓取论文列表
-2. 通过Arxiv客户端获取论文详细信息
+2. 从HuggingFace论文详情页获取摘要
 3. 使用大模型翻译标题和摘要
 """
 
 import requests
 import os
 import re
-import arxiv
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from openai import OpenAI
@@ -20,7 +19,7 @@ from typing import Optional, List, Dict
 # 基础配置
 BASE_URL = "https://huggingface.co"
 LIKES_THRESHOLD = 45  # 点赞数阈值
-TARGET_WEEK = "2026-W10"  # 目标周，格式如 "2026-W04"，None 表示使用当前周
+TARGET_WEEK = None  # 目标周，格式如 "2026-W04"，None 表示使用当前周
 
 # LLM配置
 LLM_CONFIG = {
@@ -104,10 +103,11 @@ class PaperInfo:
 
 class HuggingFaceScraper:
     """HuggingFace论文列表抓取器"""
-    
+
     def __init__(self, base_url: str = BASE_URL, likes_threshold: int = LIKES_THRESHOLD):
         self.base_url = base_url
         self.likes_threshold = likes_threshold
+        self.session = requests.Session()  # 复用连接
     
     def get_current_week(self) -> str:
         """获取当前周的标识，格式如：2026-W04"""
@@ -173,34 +173,39 @@ class HuggingFaceScraper:
         
         return paper_list
 
-
-class ArxivClient:
-    """Arxiv客户端，用于获取论文详细信息"""
-    
-    def __init__(self):
-        self.client = arxiv.Client()
-    
-    def get_paper_info(self, arxiv_id: str) -> Optional[Dict[str, str]]:
+    def get_paper_abstract(self, arxiv_id: str) -> Optional[str]:
         """
-        根据arxiv ID获取论文信息
+        从HuggingFace论文详情页获取摘要
         :param arxiv_id: Arxiv论文ID
-        :return: 包含标题、摘要、链接的字典
+        :return: 摘要文本
         """
+        url = f"{self.base_url}/papers/{arxiv_id}"
         try:
-            search = arxiv.Search(id_list=[arxiv_id])
-            result = next(self.client.results(search))
-            
-            return {
-                "title": result.title,
-                "abstract": result.summary.replace('\n', ' ').strip(),
-                "link": f"https://arxiv.org/abs/{arxiv_id}"
-            }
-        except StopIteration:
-            print(f"未找到论文: {arxiv_id}")
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # 找到 Abstract h2 标签
+            abstract_h2 = soup.find("h2", string=lambda x: x and "Abstract" in x.strip())
+            if not abstract_h2:
+                print(f"未找到摘要部分: {arxiv_id}")
+                return None
+
+            # 获取 h2 之后的兄弟 div
+            div = abstract_h2.find_next_sibling("div")
+            if not div:
+                print(f"未找到摘要内容: {arxiv_id}")
+                return None
+
+            # 获取文本并清理多余的空白（HuggingFace 使用 Svelte 注释分隔字符）
+            abstract = div.get_text()
+            abstract = re.sub(r'\s+', ' ', abstract).strip()
+
+            return abstract
+
         except Exception as e:
-            print(f"获取论文信息失败: {e}")
-        
-        return None
+            print(f"获取摘要失败 {arxiv_id}: {e}")
+            return None
 
 
 class Translator:
@@ -255,10 +260,9 @@ class Translator:
 
 class PaperTranslatorPipeline:
     """论文翻译流水线"""
-    
+
     def __init__(self):
         self.scraper = HuggingFaceScraper()
-        self.arxiv_client = ArxivClient()
         self.translator = Translator()
     
     def format_english_content(self, title: str, link: str, abstract: str) -> str:
@@ -316,15 +320,19 @@ class PaperTranslatorPipeline:
             print("未找到符合条件的论文，退出")
             return
         
-        # 2. 获取Arxiv详细信息
-        print("步骤 2: 获取Arxiv论文详细信息...")
+        # 2. 获取摘要
+        print("步骤 2: 获取论文摘要...")
         paper_details = []
         for paper in papers:
             print(f"正在获取: {paper.arxiv_id}")
-            info = self.arxiv_client.get_paper_info(paper.arxiv_id)
-            if info:
-                paper_details.append(info)
-        
+            abstract = self.scraper.get_paper_abstract(paper.arxiv_id)
+            if abstract:
+                paper_details.append({
+                    "title": paper.title,
+                    "link": f"https://arxiv.org/abs/{paper.arxiv_id}",
+                    "abstract": abstract
+                })
+
         print(f"成功获取 {len(paper_details)} 篇论文详情\n")
         
         # 3. 翻译并输出
